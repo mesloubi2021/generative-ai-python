@@ -27,6 +27,7 @@ except ImportError:
     __version__ = "0.0.0"
 
 USER_AGENT = "genai-py"
+GENAI_API_DISCOVERY_URL = "https://generativelanguage.googleapis.com/$discovery/rest"
 
 
 class FileServiceClient(glm.FileServiceClient):
@@ -42,7 +43,7 @@ class FileServiceClient(glm.FileServiceClient):
         request = googleapiclient.http.HttpRequest(
             http=httplib2.Http(),
             postproc=lambda resp, content: (resp, content),
-            uri=f"https://{self.api_endpoint}/$discovery/rest?version=v1beta&key={api_key}",
+            uri=f"{GENAI_API_DISCOVERY_URL}?version=v1beta&key={api_key}",
         )
         response, content = request.execute()
 
@@ -58,6 +59,7 @@ class FileServiceClient(glm.FileServiceClient):
         mime_type: str | None = None,
         name: str | None = None,
         display_name: str | None = None,
+        resumable: bool = True,
     ) -> glm.File:
         if self._discovery_api is None:
             self._setup_discovery_api()
@@ -68,7 +70,9 @@ class FileServiceClient(glm.FileServiceClient):
         if display_name is not None:
             file["displayName"] = display_name
 
-        media = googleapiclient.http.MediaFileUpload(filename=path, mimetype=mime_type)
+        media = googleapiclient.http.MediaFileUpload(
+            filename=path, mimetype=mime_type, resumable=resumable
+        )
         request = self._discovery_api.media().upload(body={"file": file}, media_body=media)
         result = request.execute()
 
