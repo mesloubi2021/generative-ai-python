@@ -1,22 +1,45 @@
 import inspect
 import string
+import textwrap
+from typing_extensions import TypedDict
 
 from absl.testing import absltest
 from absl.testing import parameterized
-import google.ai.generativelanguage as glm
+from google.generativeai import protos
 from google.generativeai.types import generation_types
+
+
+class Date(TypedDict):
+    day: int
+    month: int
+    year: int
+
+
+class Person(TypedDict):
+    name: str
+    favorite_color: str
+    birthday: Date
 
 
 class UnitTests(parameterized.TestCase):
     @parameterized.named_parameters(
         [
-            "glm.GenerationConfig",
-            glm.GenerationConfig(temperature=0.1, stop_sequences=["end"]),
+            "protos.GenerationConfig",
+            protos.GenerationConfig(
+                temperature=0.1,
+                stop_sequences=["end"],
+                response_schema=protos.Schema(type="STRING"),
+            ),
         ],
-        ["GenerationConfigDict", {"temperature": 0.1, "stop_sequences": ["end"]}],
+        [
+            "GenerationConfigDict",
+            {"temperature": 0.1, "stop_sequences": ["end"], "response_schema": {"type": "STRING"}},
+        ],
         [
             "GenerationConfig",
-            generation_types.GenerationConfig(temperature=0.1, stop_sequences=["end"]),
+            generation_types.GenerationConfig(
+                temperature=0.1, stop_sequences=["end"], response_schema={"type": "STRING"}
+            ),
         ],
     )
     def test_to_generation_config(self, config):
@@ -27,15 +50,15 @@ class UnitTests(parameterized.TestCase):
 
     def test_join_citation_metadatas(self):
         citations = [
-            glm.CitationMetadata(
+            protos.CitationMetadata(
                 citation_sources=[
-                    glm.CitationSource(start_index=3, end_index=21, uri="https://google.com"),
+                    protos.CitationSource(start_index=3, end_index=21, uri="https://google.com"),
                 ]
             ),
-            glm.CitationMetadata(
+            protos.CitationMetadata(
                 citation_sources=[
-                    glm.CitationSource(start_index=3, end_index=33, uri="https://google.com"),
-                    glm.CitationSource(start_index=55, end_index=92, uri="https://google.com"),
+                    protos.CitationSource(start_index=3, end_index=33, uri="https://google.com"),
+                    protos.CitationSource(start_index=55, end_index=92, uri="https://google.com"),
                 ]
             ),
         ]
@@ -53,14 +76,14 @@ class UnitTests(parameterized.TestCase):
     def test_join_safety_ratings_list(self):
         ratings = [
             [
-                glm.SafetyRating(category="HARM_CATEGORY_DANGEROUS", probability="LOW"),
-                glm.SafetyRating(category="HARM_CATEGORY_MEDICAL", probability="LOW"),
-                glm.SafetyRating(category="HARM_CATEGORY_SEXUAL", probability="MEDIUM"),
+                protos.SafetyRating(category="HARM_CATEGORY_DANGEROUS", probability="LOW"),
+                protos.SafetyRating(category="HARM_CATEGORY_MEDICAL", probability="LOW"),
+                protos.SafetyRating(category="HARM_CATEGORY_SEXUAL", probability="MEDIUM"),
             ],
             [
-                glm.SafetyRating(category="HARM_CATEGORY_DEROGATORY", probability="LOW"),
-                glm.SafetyRating(category="HARM_CATEGORY_SEXUAL", probability="LOW"),
-                glm.SafetyRating(
+                protos.SafetyRating(category="HARM_CATEGORY_DEROGATORY", probability="LOW"),
+                protos.SafetyRating(category="HARM_CATEGORY_SEXUAL", probability="LOW"),
+                protos.SafetyRating(
                     category="HARM_CATEGORY_DANGEROUS",
                     probability="HIGH",
                     blocked=True,
@@ -80,20 +103,20 @@ class UnitTests(parameterized.TestCase):
 
     def test_join_contents(self):
         contents = [
-            glm.Content(role="assistant", parts=[glm.Part(text="Tell me a story about a ")]),
-            glm.Content(
+            protos.Content(role="assistant", parts=[protos.Part(text="Tell me a story about a ")]),
+            protos.Content(
                 role="assistant",
-                parts=[glm.Part(text="magic backpack that looks like this: ")],
+                parts=[protos.Part(text="magic backpack that looks like this: ")],
             ),
-            glm.Content(
+            protos.Content(
                 role="assistant",
-                parts=[glm.Part(inline_data=glm.Blob(mime_type="image/png", data=b"DATA!"))],
+                parts=[protos.Part(inline_data=protos.Blob(mime_type="image/png", data=b"DATA!"))],
             ),
         ]
         result = generation_types._join_contents(contents)
         expected = {
             "parts": [
-                {"text": ("Tell me a story about a magic backpack that looks like" " this: ")},
+                {"text": "Tell me a story about a magic backpack that looks like" " this: "},
                 {"inline_data": {"mime_type": "image/png", "data": "REFUQSE="}},
             ],
             "role": "assistant",
@@ -101,11 +124,67 @@ class UnitTests(parameterized.TestCase):
 
         self.assertEqual(expected, type(result).to_dict(result))
 
+    def test_join_parts(self):
+        contents = [
+            protos.Content(role="assistant", parts=[protos.Part(text="A")]),
+            protos.Content(role="assistant", parts=[protos.Part(text="B")]),
+            protos.Content(role="assistant", parts=[protos.Part(executable_code={"code": "C"})]),
+            protos.Content(role="assistant", parts=[protos.Part(executable_code={"code": "D"})]),
+            protos.Content(
+                role="assistant", parts=[protos.Part(code_execution_result={"output": "E"})]
+            ),
+            protos.Content(
+                role="assistant", parts=[protos.Part(code_execution_result={"output": "F"})]
+            ),
+            protos.Content(role="assistant", parts=[protos.Part(text="G")]),
+            protos.Content(role="assistant", parts=[protos.Part(text="H")]),
+        ]
+        g = generation_types._join_contents(contents=contents)
+        expected = protos.Content(
+            role="assistant",
+            parts=[
+                protos.Part(text="AB"),
+                protos.Part(executable_code={"code": "CD"}),
+                protos.Part(code_execution_result={"output": "EF"}),
+                protos.Part(text="GH"),
+            ],
+        )
+        self.assertEqual(expected, g)
+
+    def test_code_execution_text(self):
+        content = protos.Content(
+            role="assistant",
+            parts=[
+                protos.Part(text="AB"),
+                protos.Part(executable_code={"language": "PYTHON", "code": "CD"}),
+                protos.Part(code_execution_result={"outcome": "OUTCOME_OK", "output": "EF"}),
+                protos.Part(text="GH"),
+            ],
+        )
+        response = generation_types.GenerateContentResponse(
+            done=True,
+            iterator=None,
+            result=protos.GenerateContentResponse({"candidates": [{"content": content}]}),
+        )
+        expected = textwrap.dedent(
+            """\
+            AB
+            ``` python
+            CD
+            ```
+            ```
+            EF
+            ```
+            GH"""
+        )
+        self.assertEqual(expected, response.text)
+
     def test_many_join_contents(self):
         import string
 
         contents = [
-            glm.Content(role="assistant", parts=[glm.Part(text=a)]) for a in string.ascii_lowercase
+            protos.Content(role="assistant", parts=[protos.Part(text=a)])
+            for a in string.ascii_lowercase
         ]
 
         result = generation_types._join_contents(contents)
@@ -118,41 +197,53 @@ class UnitTests(parameterized.TestCase):
 
     def test_join_candidates(self):
         candidates = [
-            glm.Candidate(
+            protos.Candidate(
                 index=0,
-                content=glm.Content(
+                content=protos.Content(
                     role="assistant",
-                    parts=[glm.Part(text="Tell me a story about a ")],
+                    parts=[protos.Part(text="Tell me a story about a ")],
                 ),
-                citation_metadata=glm.CitationMetadata(
+                citation_metadata=protos.CitationMetadata(
                     citation_sources=[
-                        glm.CitationSource(start_index=55, end_index=85, uri="https://google.com"),
+                        protos.CitationSource(
+                            start_index=55, end_index=85, uri="https://google.com"
+                        ),
                     ]
                 ),
             ),
-            glm.Candidate(
+            protos.Candidate(
                 index=0,
-                content=glm.Content(
+                content=protos.Content(
                     role="assistant",
-                    parts=[glm.Part(text="magic backpack that looks like this: ")],
+                    parts=[protos.Part(text="magic backpack that looks like this: ")],
                 ),
-                citation_metadata=glm.CitationMetadata(
+                citation_metadata=protos.CitationMetadata(
                     citation_sources=[
-                        glm.CitationSource(start_index=55, end_index=92, uri="https://google.com"),
-                        glm.CitationSource(start_index=3, end_index=21, uri="https://google.com"),
+                        protos.CitationSource(
+                            start_index=55, end_index=92, uri="https://google.com"
+                        ),
+                        protos.CitationSource(
+                            start_index=3, end_index=21, uri="https://google.com"
+                        ),
                     ]
                 ),
             ),
-            glm.Candidate(
+            protos.Candidate(
                 index=0,
-                content=glm.Content(
+                content=protos.Content(
                     role="assistant",
-                    parts=[glm.Part(inline_data=glm.Blob(mime_type="image/png", data=b"DATA!"))],
+                    parts=[
+                        protos.Part(inline_data=protos.Blob(mime_type="image/png", data=b"DATA!"))
+                    ],
                 ),
-                citation_metadata=glm.CitationMetadata(
+                citation_metadata=protos.CitationMetadata(
                     citation_sources=[
-                        glm.CitationSource(start_index=55, end_index=92, uri="https://google.com"),
-                        glm.CitationSource(start_index=3, end_index=21, uri="https://google.com"),
+                        protos.CitationSource(
+                            start_index=55, end_index=92, uri="https://google.com"
+                        ),
+                        protos.CitationSource(
+                            start_index=3, end_index=21, uri="https://google.com"
+                        ),
                     ]
                 ),
                 finish_reason="STOP",
@@ -163,7 +254,7 @@ class UnitTests(parameterized.TestCase):
         expected = {
             "content": {
                 "parts": [
-                    {"text": ("Tell me a story about a magic backpack that looks like" " this: ")},
+                    {"text": "Tell me a story about a magic backpack that looks like" " this: "},
                     {"text": ""},
                 ],
                 "role": "assistant",
@@ -192,17 +283,17 @@ class UnitTests(parameterized.TestCase):
 
     def test_join_prompt_feedbacks(self):
         feedbacks = [
-            glm.GenerateContentResponse.PromptFeedback(
+            protos.GenerateContentResponse.PromptFeedback(
                 block_reason="SAFETY",
                 safety_ratings=[
-                    glm.SafetyRating(category="HARM_CATEGORY_DANGEROUS", probability="LOW"),
+                    protos.SafetyRating(category="HARM_CATEGORY_DANGEROUS", probability="LOW"),
                 ],
             ),
-            glm.GenerateContentResponse.PromptFeedback(),
-            glm.GenerateContentResponse.PromptFeedback(),
-            glm.GenerateContentResponse.PromptFeedback(
+            protos.GenerateContentResponse.PromptFeedback(),
+            protos.GenerateContentResponse.PromptFeedback(),
+            protos.GenerateContentResponse.PromptFeedback(
                 safety_ratings=[
-                    glm.SafetyRating(category="HARM_CATEGORY_MEDICAL", probability="HIGH"),
+                    protos.SafetyRating(category="HARM_CATEGORY_MEDICAL", probability="HIGH"),
                 ]
             ),
         ]
@@ -347,7 +438,7 @@ class UnitTests(parameterized.TestCase):
         {
             "content": {
                 "parts": [
-                    {"text": ("Tell me a story about a magic backpack" " that looks like this: ")},
+                    {"text": "Tell me a story about a magic backpack" " that looks like this: "},
                     {
                         "inline_data": {
                             "mime_type": "image/png",
@@ -375,23 +466,23 @@ class UnitTests(parameterized.TestCase):
     ]
 
     def test_join_candidates(self):
-        candidate_lists = [[glm.Candidate(c) for c in cl] for cl in self.CANDIDATE_LISTS]
+        candidate_lists = [[protos.Candidate(c) for c in cl] for cl in self.CANDIDATE_LISTS]
         result = generation_types._join_candidate_lists(candidate_lists)
         self.assertEqual(self.MERGED_CANDIDATES, [type(r).to_dict(r) for r in result])
 
     def test_join_chunks(self):
-        chunks = [glm.GenerateContentResponse(candidates=cl) for cl in self.CANDIDATE_LISTS]
+        chunks = [protos.GenerateContentResponse(candidates=cl) for cl in self.CANDIDATE_LISTS]
 
-        chunks[0].prompt_feedback = glm.GenerateContentResponse.PromptFeedback(
+        chunks[0].prompt_feedback = protos.GenerateContentResponse.PromptFeedback(
             block_reason="SAFETY",
             safety_ratings=[
-                glm.SafetyRating(category="HARM_CATEGORY_DANGEROUS", probability="LOW"),
+                protos.SafetyRating(category="HARM_CATEGORY_DANGEROUS", probability="LOW"),
             ],
         )
 
         result = generation_types._join_chunks(chunks)
 
-        expected = glm.GenerateContentResponse(
+        expected = protos.GenerateContentResponse(
             {
                 "candidates": self.MERGED_CANDIDATES,
                 "prompt_feedback": {
@@ -410,7 +501,7 @@ class UnitTests(parameterized.TestCase):
         self.assertEqual(type(expected).to_dict(expected), type(result).to_dict(expected))
 
     def test_generate_content_response_iterator_end_to_end(self):
-        chunks = [glm.GenerateContentResponse(candidates=cl) for cl in self.CANDIDATE_LISTS]
+        chunks = [protos.GenerateContentResponse(candidates=cl) for cl in self.CANDIDATE_LISTS]
         merged = generation_types._join_chunks(chunks)
 
         response = generation_types.GenerateContentResponse.from_iterator(iter(chunks))
@@ -432,7 +523,7 @@ class UnitTests(parameterized.TestCase):
 
     def test_generate_content_response_multiple_iterators(self):
         chunks = [
-            glm.GenerateContentResponse({"candidates": [{"content": {"parts": [{"text": a}]}}]})
+            protos.GenerateContentResponse({"candidates": [{"content": {"parts": [{"text": a}]}}]})
             for a in string.ascii_lowercase
         ]
         response = generation_types.GenerateContentResponse.from_iterator(iter(chunks))
@@ -462,7 +553,7 @@ class UnitTests(parameterized.TestCase):
 
     def test_generate_content_response_resolve(self):
         chunks = [
-            glm.GenerateContentResponse({"candidates": [{"content": {"parts": [{"text": a}]}}]})
+            protos.GenerateContentResponse({"candidates": [{"content": {"parts": [{"text": a}]}}]})
             for a in "abcd"
         ]
         response = generation_types.GenerateContentResponse.from_iterator(iter(chunks))
@@ -476,7 +567,7 @@ class UnitTests(parameterized.TestCase):
         self.assertEqual(response.candidates[0].content.parts[0].text, "abcd")
 
     def test_generate_content_response_from_response(self):
-        raw_response = glm.GenerateContentResponse(
+        raw_response = protos.GenerateContentResponse(
             {"candidates": [{"content": {"parts": [{"text": "Hello world!"}]}}]}
         )
         response = generation_types.GenerateContentResponse.from_response(raw_response)
@@ -488,6 +579,109 @@ class UnitTests(parameterized.TestCase):
             self.assertEqual(
                 type(raw_response).to_dict(raw_response), type(chunk._result).to_dict(chunk._result)
             )
+
+    def test_repr_for_generate_content_response_from_response(self):
+        raw_response = protos.GenerateContentResponse(
+            {"candidates": [{"content": {"parts": [{"text": "Hello world!"}]}}]}
+        )
+        response = generation_types.GenerateContentResponse.from_response(raw_response)
+
+        result = repr(response)
+        expected = textwrap.dedent(
+            """\
+            response:
+            GenerateContentResponse(
+                done=True,
+                iterator=None,
+                result=protos.GenerateContentResponse({
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          {
+                            "text": "Hello world!"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }),
+            )"""
+        )
+        self.assertEqual(expected, result)
+
+    def test_repr_for_generate_content_response_from_iterator(self):
+        chunks = [
+            protos.GenerateContentResponse({"candidates": [{"content": {"parts": [{"text": a}]}}]})
+            for a in "abcd"
+        ]
+        response = generation_types.GenerateContentResponse.from_iterator(iter(chunks))
+
+        result = repr(response)
+        expected = textwrap.dedent(
+            """\
+            response:
+            GenerateContentResponse(
+                done=False,
+                iterator=<list_iterator>,
+                result=protos.GenerateContentResponse({
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          {
+                            "text": "a"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }),
+            )"""
+        )
+        self.assertEqual(expected, result)
+
+    @parameterized.named_parameters(
+        [
+            "protos.Schema",
+            protos.Schema(type="STRING"),
+            protos.Schema(type="STRING"),
+        ],
+        [
+            "SchemaDict",
+            {"type": "STRING"},
+            protos.Schema(type="STRING"),
+        ],
+        [
+            "str",
+            str,
+            protos.Schema(type="STRING"),
+        ],
+        ["list_of_str", list[str], protos.Schema(type="ARRAY", items=protos.Schema(type="STRING"))],
+        [
+            "fancy",
+            Person,
+            protos.Schema(
+                type="OBJECT",
+                properties=dict(
+                    name=protos.Schema(type="STRING"),
+                    favorite_color=protos.Schema(type="STRING"),
+                    birthday=protos.Schema(
+                        type="OBJECT",
+                        properties=dict(
+                            day=protos.Schema(type="INTEGER"),
+                            month=protos.Schema(type="INTEGER"),
+                            year=protos.Schema(type="INTEGER"),
+                        ),
+                    ),
+                ),
+            ),
+        ],
+    )
+    def test_response_schema(self, schema, expected):
+        gd = generation_types.to_generation_config_dict(dict(response_schema=schema))
+        actual = gd["response_schema"]
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

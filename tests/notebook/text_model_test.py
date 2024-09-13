@@ -19,7 +19,7 @@ from unittest import mock
 from absl.testing import absltest
 
 from google.api_core import exceptions
-from google.generativeai import text
+from google.generativeai.types import generation_types
 from google.generativeai.notebook import text_model
 from google.generativeai.notebook.lib import model as model_lib
 
@@ -29,20 +29,23 @@ def _fake_generator(
     model: str | None = None,
     temperature: float | None = None,
     candidate_count: int | None = None,
-) -> text.Completion:
-    return text.Completion(
-        prompt=prompt,
-        model=model,
-        temperature=temperature,
-        candidate_count=candidate_count,
-        # Smuggle the parameters as text output, so we can make assertions.
-        candidates=[
-            {"output": f"{prompt}_1"},
-            {"output": model},
-            {"output": temperature},
-            {"output": candidate_count},
-        ],
-    )
+):
+    def make_candidate(txt):
+        c = mock.Mock()
+        p = mock.Mock()
+        p.text = str(txt)
+        c.content.parts = [p]
+        return c
+
+    response = mock.Mock()
+    # Smuggle the parameters as text output, so we can make assertions.
+    response.candidates = [
+        make_candidate(f"{prompt}_1"),
+        make_candidate(model),
+        make_candidate(temperature),
+        make_candidate(candidate_count),
+    ]
+    return response
 
 
 class TestModel(text_model.TextModel):
@@ -55,7 +58,7 @@ class TestModel(text_model.TextModel):
         temperature: float | None = None,
         candidate_count: int | None = None,
         **kwargs,
-    ) -> text.Completion:
+    ) -> generation_types.GenerateContentResponse:
         return _fake_generator(
             prompt=prompt,
             model=model,
@@ -65,21 +68,47 @@ class TestModel(text_model.TextModel):
 
 
 class TextModelTestCase(absltest.TestCase):
-    def test_generate_text(self):
+    def test_generate_text_without_args(self):
         model = TestModel()
 
         result = model.call_model("prompt goes in")
         self.assertEqual(result.text_results[0], "prompt goes in_1")
-        self.assertIsNone(result.text_results[1])
-        self.assertIsNone(result.text_results[2])
-        self.assertIsNone(result.text_results[3])
 
+    def test_generate_text_without_args_none_results(self):
+        model = TestModel()
+
+        result = model.call_model("prompt goes in")
+        self.assertEqual(result.text_results[1], "None")
+        self.assertEqual(result.text_results[2], "None")
+        self.assertEqual(result.text_results[3], "None")
+
+    def test_generate_text_with_args_first_result(self):
+        model = TestModel()
         args = model_lib.ModelArguments(model="model_name", temperature=0.42, candidate_count=5)
+
         result = model.call_model("prompt goes in", args)
         self.assertEqual(result.text_results[0], "prompt goes in_1")
+
+    def test_generate_text_with_args_model_name(self):
+        model = TestModel()
+        args = model_lib.ModelArguments(model="model_name", temperature=0.42, candidate_count=5)
+
+        result = model.call_model("prompt goes in", args)
         self.assertEqual(result.text_results[1], "model_name")
-        self.assertEqual(result.text_results[2], 0.42)
-        self.assertEqual(result.text_results[3], 5)
+
+    def test_generate_text_with_args_temperature(self):
+        model = TestModel()
+        args = model_lib.ModelArguments(model="model_name", temperature=0.42, candidate_count=5)
+        result = model.call_model("prompt goes in", args)
+
+        self.assertEqual(result.text_results[2], str(0.42))
+
+    def test_generate_text_with_args_candidate_count(self):
+        model = TestModel()
+        args = model_lib.ModelArguments(model="model_name", temperature=0.42, candidate_count=5)
+
+        result = model.call_model("prompt goes in", args)
+        self.assertEqual(result.text_results[3], str(5))
 
     def test_retry(self):
         model = TestModel()

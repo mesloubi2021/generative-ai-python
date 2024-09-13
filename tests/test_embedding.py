@@ -14,10 +14,11 @@
 # limitations under the License.
 import copy
 import math
+from typing import Any
 import unittest
 import unittest.mock as mock
 
-import google.ai.generativelanguage as glm
+from google.generativeai import protos
 
 from google.generativeai import embedding
 
@@ -44,18 +45,20 @@ class UnitTests(parameterized.TestCase):
 
         @add_client_method
         def embed_content(
-            request: glm.EmbedContentRequest,
-        ) -> glm.EmbedContentResponse:
+            request: protos.EmbedContentRequest,
+            **kwargs,
+        ) -> protos.EmbedContentResponse:
             self.observed_requests.append(request)
-            return glm.EmbedContentResponse(embedding=glm.ContentEmbedding(values=[1, 2, 3]))
+            return protos.EmbedContentResponse(embedding=protos.ContentEmbedding(values=[1, 2, 3]))
 
         @add_client_method
         def batch_embed_contents(
-            request: glm.BatchEmbedContentsRequest,
-        ) -> glm.BatchEmbedContentsResponse:
+            request: protos.BatchEmbedContentsRequest,
+            **kwargs,
+        ) -> protos.BatchEmbedContentsResponse:
             self.observed_requests.append(request)
-            return glm.BatchEmbedContentsResponse(
-                embeddings=[glm.ContentEmbedding(values=[1, 2, 3])] * len(request.requests)
+            return protos.BatchEmbedContentsResponse(
+                embeddings=[protos.ContentEmbedding(values=[1, 2, 3])] * len(request.requests)
             )
 
     def test_embed_content(self):
@@ -65,8 +68,9 @@ class UnitTests(parameterized.TestCase):
         self.assertIsInstance(emb, dict)
         self.assertEqual(
             self.observed_requests[-1],
-            glm.EmbedContentRequest(
-                model=DEFAULT_EMB_MODEL, content=glm.Content(parts=[glm.Part(text="What are you?")])
+            protos.EmbedContentRequest(
+                model=DEFAULT_EMB_MODEL,
+                content=protos.Content(parts=[protos.Part(text="What are you?")]),
             ),
         )
         self.assertIsInstance(emb["embedding"][0], float)
@@ -119,8 +123,62 @@ class UnitTests(parameterized.TestCase):
         text = "What are you?"
         with self.assertRaises(ValueError):
             embedding.embed_content(
-                model=DEFAULT_EMB_MODEL, content=text, task_type="unspecified", title="Exploring AI"
+                model=DEFAULT_EMB_MODEL, content=text, task_type="similarity", title="Exploring AI"
             )
+
+    def test_embed_content_with_negative_output_dimensionality(self):
+        text = "What are you?"
+        with self.assertRaises(ValueError):
+            embedding.embed_content(model=DEFAULT_EMB_MODEL, content=text, output_dimensionality=-1)
+
+    def test_generate_answer_called_with_request_options(self):
+        self.client.embed_content = mock.MagicMock()
+        request = mock.ANY
+        request_options = {"timeout": 120}
+
+        text = "What are you?"
+        try:
+            embedding.embed_content(
+                model=DEFAULT_EMB_MODEL,
+                content=text,
+                request_options=request_options,
+            )
+        except AttributeError:
+            pass
+
+        self.client.embed_content.assert_called_once_with(request, **request_options)
+
+    def test_batch_embed_contents_called_with_request_options(self):
+        self.client.batch_embed_contents = mock.MagicMock()
+        request = mock.ANY
+        request_options = {"timeout": 120}
+
+        text = "What are you?"
+        try:
+            embedding.embed_content(
+                model=DEFAULT_EMB_MODEL,
+                content=[text],
+                request_options=request_options,
+            )
+        except AttributeError:
+            pass
+
+        self.client.batch_embed_contents.assert_called_once_with(request, **request_options)
+
+    def test_embed_content_called_with_request_options(self):
+        self.client.embed_content = mock.MagicMock()
+        request = mock.ANY
+        request_options = {"timeout": 120}
+
+        try:
+            text = "What are you?"
+            embedding.embed_content(
+                model=DEFAULT_EMB_MODEL, content=text, request_options=request_options
+            )
+        except AttributeError:
+            pass
+
+        self.client.embed_content.assert_called_once_with(request, **request_options)
 
 
 if __name__ == "__main__":
