@@ -1,51 +1,51 @@
-Google Generative AI Python Client
-==================================
+# Google AI Python SDK for the Gemini API
 
 [![PyPI version](https://badge.fury.io/py/google-generativeai.svg)](https://badge.fury.io/py/google-generativeai)
 ![Python support](https://img.shields.io/pypi/pyversions/google-generativeai)
 ![PyPI - Downloads](https://img.shields.io/pypi/dd/google-generativeai)
 
-Get started using the PaLM API in Python. Check out the [developer site](https://developers.generativeai.google/)
-for comprehensive documentation.
+The Google AI Python SDK is the easiest way for Python developers to build with the Gemini API. The Gemini API gives you access to Gemini [models](https://ai.google.dev/models/gemini) created by [Google DeepMind](https://deepmind.google/technologies/gemini/#introduction). Gemini models are built from the ground up to be multimodal, so you can reason seamlessly across text, images, and code. 
 
-## Installation and usage
+## Get started with the Gemini API
+1. Go to [Google AI Studio](https://aistudio.google.com/).
+2. Login with your Google account.
+3. [Create](https://aistudio.google.com/app/apikey) an API key.
+4. Try a Python SDK [quickstart](https://github.com/google-gemini/gemini-api-cookbook/blob/main/quickstarts/Prompting.ipynb) in the [Gemini API Cookbook](https://github.com/google-gemini/gemini-api-cookbook/).
+5. For detailed instructions, try the 
+[Python SDK tutorial](https://ai.google.dev/tutorials/python_quickstart) on [ai.google.dev](https://ai.google.dev).
 
-Install from PyPI.
-```bash
-pip install google-generativeai
+## Usage example
+See the [Gemini API Cookbook](https://github.com/google-gemini/gemini-api-cookbook/) or [ai.google.dev](https://ai.google.dev) for complete code.
+
+1. Install from [PyPI](https://pypi.org/project/google-generativeai).
+
+`pip install -U google-generativeai`
+
+2. Import the SDK and configure your API key.
+
+```python
+import google.generativeai as genai
+import os
+
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 ```
 
-Get an [API key from MakerSuite](https://makersuite.google.com/app/apikey), then configure it here.
-```python
-import google.generativeai as palm
+3. Create a model and run a prompt.
 
-palm.configure(api_key=os.environ["PALM_API_KEY"])
-```
-
-Use [`palm.generate_text`](https://developers.generativeai.google/api/python/google/generativeai/generate_text)
-to have the model complete some initial text.
 ```python
-response = palm.generate_text(prompt="The opposite of hot is")
-print(response.result)  # cold.
-```
-
-Use [`palm.chat`](https://developers.generativeai.google/api/python/google/generativeai/chat)
-to have a discussion with a model.
-```python
-response = palm.chat(messages=["Hello."])
-print(response.last) #  'Hello! What can I help you with?'
-response.reply("Can you tell me a joke?")
+model = genai.GenerativeModel('gemini-1.5-flash')
+response = model.generate_content("The opposite of hot is")
+print(response.text)
 ```
 
 ## Documentation
 
-Checkout the full [API docs](https://developers.generativeai.google/api), the [guide](https://developers.generativeai.google/guide) and [quick starts](https://developers.generativeai.google/tutorials).
+See the [Gemini API Cookbook](https://github.com/google-gemini/gemini-api-cookbook/) or [ai.google.dev](https://ai.google.dev) for complete documentation.
 
-## Colab magics
+## Contributing
 
-Once installed, use the Python client via the `%%palm` Colab magic. Read the full guide [here](https://developers.generativeai.google/tools/notebook_magic).
+See [Contributing](https://github.com/google/generative-ai-python/blob/main/CONTRIBUTING.md) for more information on contributing to the Google AI Python SDK.
 
-```python
-%%palm
-The best thing since sliced bread is
-```
+## License
+
+The contents of this repository are licensed under the [Apache License, version 2.0](http://www.apache.org/licenses/LICENSE-2.0).

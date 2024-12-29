@@ -15,15 +15,27 @@
 """Type definitions for the models service."""
 from __future__ import annotations
 
+from collections.abc import Mapping
+import csv
 import dataclasses
 import datetime
+import json
+import pathlib
 import re
-from typing import Any, Iterable, TypedDict, Union
 
-import google.ai.generativelanguage as glm
+from typing import Any, Iterable, Union
+
+import urllib.request
+from typing_extensions import TypedDict
+
+from google.generativeai import protos
+from google.generativeai.types import permission_types
+from google.generativeai import string_utils
+
 
 __all__ = [
     "Model",
+    "ModelNameOptions",
     "AnyModelNameOptions",
     "BaseModelNameOptions",
     "TunedModelNameOptions",
@@ -32,9 +44,20 @@ __all__ = [
     "TunedModelState",
 ]
 
-TunedModelState = glm.TunedModel.State
+TunedModelState = protos.TunedModel.State
 
 TunedModelStateOptions = Union[None, str, int, TunedModelState]
+
+_TUNED_MODEL_VALID_NAME = r"[a-z](([a-z0-9-]{0,61}[a-z0-9])?)$"
+TUNED_MODEL_NAME_ERROR_MSG = """The `name` must consist of alphanumeric characters (or -) and be at most 63 characters; The name you entered:
+\tlen(name)== {length}
+\tname={name}
+"""
+
+
+def valid_tuned_model_name(name: str) -> bool:
+    return re.match(_TUNED_MODEL_VALID_NAME, name) is not None
+
 
 # fmt: off
 _TUNED_MODEL_STATES: dict[TunedModelStateOptions, TunedModelState] = {
@@ -65,22 +88,24 @@ def to_tuned_model_state(x: TunedModelStateOptions) -> TunedModelState:
     return _TUNED_MODEL_STATES[x]
 
 
+@string_utils.prettyprint
 @dataclasses.dataclass
 class Model:
-    """A dataclass representation of a `glm.Model`.
+    """A dataclass representation of a `protos.Model`.
 
     Attributes:
-        name: The resource name of the `Model`. Format: `models/{model}` with a `{model}` naming convention of:
-          "{base_model_id}-{version}". For example: `models/chat-bison-001`.
+        name: The resource name of the `Model`. Format: `models/{model}` with a `{model}` naming
+           convention of: "{base_model_id}-{version}". For example: `models/chat-bison-001`.
         base_model_id: The base name of the model. For example: `chat-bison`.
         version:  The major version number of the model. For example: `001`.
-        display_name: The human-readable name of the model. E.g. `"Chat Bison"`. The name can be up to 128 characters
-           long and can consist of any UTF-8 characters.
+        display_name: The human-readable name of the model. E.g. `"Chat Bison"`. The name can be up
+           to 128 characters long and can consist of any UTF-8 characters.
         description: A short description of the model.
         input_token_limit: Maximum number of input tokens allowed for this model.
         output_token_limit: Maximum number of output tokens available for this model.
-        supported_generation_methods: lists which methods are supported by the model. The method names are defined as
-           Pascal case strings, such as `generateMessage` which correspond to API methods.
+        supported_generation_methods: lists which methods are supported by the model. The method
+          names are defined as Pascal case strings, such as `generateMessage` which correspond to
+          API methods.
     """
 
     name: str
@@ -92,6 +117,7 @@ class Model:
     output_token_limit: int
     supported_generation_methods: list[str]
     temperature: float | None = None
+    max_temperature: float | None = None
     top_p: float | None = None
     top_k: int | None = None
 
@@ -115,9 +141,11 @@ def idecode_time(parent: dict["str", Any], name: str):
         parent[name] = dt
 
 
-def decode_tuned_model(tuned_model: glm.TunedModel | dict["str", Any]) -> TunedModel:
-    if isinstance(tuned_model, glm.TunedModel):
-        tuned_model = type(tuned_model).to_dict(tuned_model)  # pytype: disable=attribute-error
+def decode_tuned_model(tuned_model: protos.TunedModel | dict["str", Any]) -> TunedModel:
+    if isinstance(tuned_model, protos.TunedModel):
+        tuned_model = type(tuned_model).to_dict(
+            tuned_model, including_default_value_fields=False
+        )  # pytype: disable=attribute-error
     tuned_model["state"] = to_tuned_model_state(tuned_model.pop("state", None))
 
     base_model = tuned_model.pop("base_model", None)
@@ -152,9 +180,10 @@ def decode_tuned_model(tuned_model: glm.TunedModel | dict["str", Any]) -> TunedM
     return TunedModel(**tuned_model)
 
 
+@string_utils.prettyprint
 @dataclasses.dataclass
 class TunedModel:
-    """A dataclass representation of a `glm.TunedModel`."""
+    """A dataclass representation of a `protos.TunedModel`."""
 
     name: str | None = None
     source_model: str | None = None
@@ -168,8 +197,14 @@ class TunedModel:
     create_time: datetime.datetime | None = None
     update_time: datetime.datetime | None = None
     tuning_task: TuningTask | None = None
+    reader_project_numbers: list[int] | None = None
+
+    @property
+    def permissions(self) -> permission_types.Permissions:
+        return permission_types.Permissions(self)
 
 
+@string_utils.prettyprint
 @dataclasses.dataclass
 class TuningTask:
     start_time: datetime.datetime | None = None
@@ -183,31 +218,117 @@ class TuningExampleDict(TypedDict):
     output: str
 
 
-TuningExampleOptions = Union[TuningExampleDict, glm.TuningExample, tuple[str, str]]
+TuningExampleOptions = Union[TuningExampleDict, protos.TuningExample, tuple[str, str], list[str]]
+
+# TODO(markdaoust): gs:// URLS? File-type argument for files without extension?
 TuningDataOptions = Union[
-    glm.Dataset, Iterable[TuningExampleOptions]
-]  # TODO(markdaoust): csv, json, pandas, np
+    pathlib.Path,
+    str,
+    protos.Dataset,
+    Mapping[str, Iterable[str]],
+    Iterable[TuningExampleOptions],
+]
 
 
-def encode_tuning_data(data: TuningDataOptions) -> glm.Dataset:
-    if isinstance(data, glm.Dataset):
+def encode_tuning_data(
+    data: TuningDataOptions, input_key="text_input", output_key="output"
+) -> protos.Dataset:
+    if isinstance(data, protos.Dataset):
         return data
 
+    if isinstance(data, str):
+        # Strings are either URLs or system paths.
+        if re.match(r"^\w+://\S+$", data):
+            data = _normalize_url(data)
+        else:
+            # Normalize system paths to use pathlib
+            data = pathlib.Path(data)
+
+    if isinstance(data, (str, pathlib.Path)):
+        if isinstance(data, str):
+            f = urllib.request.urlopen(data)
+            # csv needs strings, json does not.
+            content = (line.decode("utf-8") for line in f)
+        else:
+            f = data.open("r")
+            content = f
+
+        if str(data).lower().endswith(".json"):
+            with f:
+                data = json.load(f)
+        else:
+            with f:
+                data = csv.DictReader(content)
+                return _convert_iterable(data, input_key, output_key)
+
+    if hasattr(data, "keys"):
+        return _convert_dict(data, input_key, output_key)
+    else:
+        return _convert_iterable(data, input_key, output_key)
+
+
+def _normalize_url(url: str) -> str:
+    sheet_base = "https://docs.google.com/spreadsheets"
+    if url.startswith(sheet_base):
+        # Normalize google-sheets URLs to download the csv.
+        id_match = re.match(f"{sheet_base}/d/[^/]+", url)
+        if id_match is None:
+            raise ValueError("Incomplete Google Sheets URL: {data}")
+
+        if tab_match := re.search(r"gid=(\d+)", url):
+            tab_param = f"&gid={tab_match.group(1)}"
+        else:
+            tab_param = ""
+
+        url = f"{id_match.group(0)}/export?format=csv{tab_param}"
+
+    return url
+
+
+def _convert_dict(data, input_key, output_key):
+    new_data = list()
+
+    try:
+        inputs = data[input_key]
+    except KeyError:
+        raise KeyError(
+            f"Invalid key: The input key '{input_key}' does not exist in the data. "
+            f"Available keys are: {sorted(data.keys())}."
+        )
+
+    try:
+        outputs = data[output_key]
+    except KeyError:
+        raise KeyError(
+            f"Invalid key: The output key '{output_key}' does not exist in the data. "
+            f"Available keys are: {sorted(data.keys())}."
+        )
+
+    for i, o in zip(inputs, outputs):
+        new_data.append(protos.TuningExample({"text_input": str(i), "output": str(o)}))
+    return protos.Dataset(examples=protos.TuningExamples(examples=new_data))
+
+
+def _convert_iterable(data, input_key, output_key):
     new_data = list()
     for example in data:
-        example = encode_tuning_example(example)
+        example = encode_tuning_example(example, input_key, output_key)
         new_data.append(example)
-    return glm.Dataset(examples=glm.TuningExamples(examples=new_data))
+    return protos.Dataset(examples=protos.TuningExamples(examples=new_data))
 
 
-def encode_tuning_example(example: TuningExampleOptions):
-    if isinstance(example, tuple):
-        example = glm.TuningExample(text_input=example[0], output=example[1])
-    else:  # dict or  glm.TuningExample
-        example = glm.TuningExample(example)
+def encode_tuning_example(example: TuningExampleOptions, input_key, output_key):
+    if isinstance(example, protos.TuningExample):
+        return example
+    elif isinstance(example, (tuple, list)):
+        a, b = example
+        example = protos.TuningExample(text_input=a, output=b)
+    else:  # dict
+        example = protos.TuningExample(text_input=example[input_key], output=example[output_key])
     return example
 
 
+@string_utils.prettyprint
 @dataclasses.dataclass
 class TuningSnapshot:
     step: int
@@ -216,6 +337,7 @@ class TuningSnapshot:
     compute_time: datetime.datetime
 
 
+@string_utils.prettyprint
 @dataclasses.dataclass
 class Hyperparameters:
     epoch_count: int = 0
@@ -223,21 +345,26 @@ class Hyperparameters:
     learning_rate: float = 0.0
 
 
-BaseModelNameOptions = Union[str, Model, glm.Model]
-TunedModelNameOptions = Union[str, TunedModel, glm.TunedModel]
-AnyModelNameOptions = Union[str, Model, glm.Model, TunedModel, glm.TunedModel]
+BaseModelNameOptions = Union[str, Model, protos.Model]
+TunedModelNameOptions = Union[str, TunedModel, protos.TunedModel]
+AnyModelNameOptions = Union[str, Model, protos.Model, TunedModel, protos.TunedModel]
+ModelNameOptions = AnyModelNameOptions
 
 
 def make_model_name(name: AnyModelNameOptions):
-    if isinstance(name, (Model, glm.Model, TunedModel, glm.TunedModel)):
+    if isinstance(name, (Model, protos.Model, TunedModel, protos.TunedModel)):
         name = name.name  # pytype: disable=attribute-error
     elif isinstance(name, str):
         name = name
     else:
-        raise TypeError("Expected: str, Model, or TunedModel")
+        raise TypeError(
+            "Invalid input type. Expected one of the following types: `str`, `Model`, or `TunedModel`."
+        )
 
     if not (name.startswith("models/") or name.startswith("tunedModels/")):
-        raise ValueError("Model names should start with `models/` or `tunedModels/`")
+        raise ValueError(
+            f"Invalid model name: '{name}'. Model names should start with 'models/' or 'tunedModels/'."
+        )
 
     return name
 
@@ -246,9 +373,10 @@ ModelsIterable = Iterable[Model]
 TunedModelsIterable = Iterable[TunedModel]
 
 
+@string_utils.prettyprint
 @dataclasses.dataclass
 class TokenCount:
-    """A dataclass representation of a `glm.TokenCountResponse`.
+    """A dataclass representation of a `protos.TokenCountResponse`.
 
     Attributes:
         token_count: The number of tokens returned by the model's tokenizer for the `input_text`.

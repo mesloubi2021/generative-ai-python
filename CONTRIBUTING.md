@@ -24,7 +24,7 @@ Follow either of the two links above to access the appropriate CLA and
 instructions for how to sign and return it. Once we receive it, we'll be able to
 accept your pull requests.
 
-## Contributing A Patch
+## Contributing a Patch
 
 1.  Submit an issue describing your proposed change to the repo in question.
 1.  The repo owner will respond to your issue promptly.
@@ -45,7 +45,7 @@ accept your pull requests.
 1.  [Set up authentication with a service account][auth] so you can access the
     API from your local workstation.
 
-You can use an API-key, but remember never to same it in your source files.
+You can use an API-key, but remember never to save it in your source files.
 
 
 ## Development
@@ -62,15 +62,40 @@ This "editable" mode lets you edit the source without needing to reinstall the p
 
 ### Testing
 
-Use the builtin unittest package:
+To ensure the integrity of the codebase, we have a suite of tests located in the `generative-ai-python/tests` directory. 
+
+You can run all these tests using Python's built-in `unittest` module or the `pytest` library. 
+
+For `unittest`, open a terminal and navigate to the root directory of the project. Then, execute the following command:
 
 ```
- python -m unittest discover --pattern '*test*.py'
+python -m unittest discover -s tests
+
+# or more simply
+python -m unittest
 ```
+
+Alternatively, if you prefer using `pytest`, you can install it using pip:
+
+```
+pip install pytest
+```
+
+Then, run the tests with the following command:
+
+```
+pytest tests
+
+# or more simply
+pytest
+```
+
 
 Or to debug, use:
 
-```commandline
+```
+pip install nose2
+
 nose2 --debugger
 ```
 
@@ -80,7 +105,9 @@ Use `pytype` (configured in `pyproject.toml`)
 
 ```
 pip install pytype
+touch google/__init__.py   #  https://github.com/google/pytype/issues/464
 pytype
+rm google/__init__.py
 ```
 
 ### Formatting:
@@ -97,7 +124,6 @@ black .
 ```
 python docs/build_docs.py
 ```
-
 
 [setup]: https://cloud.google.com/nodejs/docs/setup
 [projects]: https://console.cloud.google.com/project
