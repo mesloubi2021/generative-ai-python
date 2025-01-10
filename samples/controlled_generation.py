@@ -150,7 +150,7 @@ class UnitTests(absltest.TestCase):
                 response_mime_type="text/x.enum", response_schema=Choice
             ),
         )
-        print(result)  # Keyboard
+        print(result)  # "Keyboard"
         # [END x_enum]
 
     def test_x_enum_raw(self):
@@ -170,7 +170,7 @@ class UnitTests(absltest.TestCase):
                 },
             ),
         )
-        print(result)  # Keyboard
+        print(result)  # "Keyboard"
         # [END x_enum_raw]
 
 

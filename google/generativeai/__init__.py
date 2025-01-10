@@ -59,6 +59,8 @@ from google.generativeai.files import delete_file
 from google.generativeai.generative_models import GenerativeModel
 from google.generativeai.generative_models import ChatSession
 
+from google.generativeai.vision_models import *
+
 from google.generativeai.models import list_models
 from google.generativeai.models import list_tuned_models
 
@@ -77,7 +79,6 @@ from google.generativeai.types import GenerationConfig
 
 __version__ = version.__version__
 
-del embedding
 del files
 del generative_models
 del models

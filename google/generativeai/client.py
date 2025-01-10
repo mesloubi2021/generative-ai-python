@@ -3,11 +3,12 @@ from __future__ import annotations
 import os
 import contextlib
 import inspect
+import collections
 import dataclasses
 import pathlib
 import threading
 from typing import Any, cast
-from collections.abc import Sequence
+from collections.abc import Sequence, Mapping
 import httplib2
 from io import IOBase
 
@@ -23,6 +24,11 @@ from google.api_core import operations_v1
 
 import googleapiclient.http
 import googleapiclient.discovery
+
+from google.protobuf import struct_pb2
+
+from proto.marshal.collections import maps
+from proto.marshal.collections import repeated
 
 try:
     from google.generativeai import version
@@ -132,6 +138,70 @@ class FileServiceAsyncClient(glm.FileServiceAsyncClient):
         )
 
 
+# This is to get around https://github.com/googleapis/proto-plus-python/issues/488
+def to_value(value) -> struct_pb2.Value:
+    """Return a protobuf Value object representing this value."""
+    if isinstance(value, struct_pb2.Value):
+        return value
+    if value is None:
+        return struct_pb2.Value(null_value=0)
+    if isinstance(value, bool):
+        return struct_pb2.Value(bool_value=value)
+    if isinstance(value, (int, float)):
+        return struct_pb2.Value(number_value=float(value))
+    if isinstance(value, str):
+        return struct_pb2.Value(string_value=value)
+    if isinstance(value, collections.abc.Sequence):
+        return struct_pb2.Value(list_value=to_list_value(value))
+    if isinstance(value, collections.abc.Mapping):
+        return struct_pb2.Value(struct_value=to_mapping_value(value))
+    raise ValueError("Unable to coerce value: %r" % value)
+
+
+def to_list_value(value) -> struct_pb2.ListValue:
+    # We got a proto, or else something we sent originally.
+    # Preserve the instance we have.
+    if isinstance(value, struct_pb2.ListValue):
+        return value
+    if isinstance(value, repeated.RepeatedComposite):
+        return struct_pb2.ListValue(values=[v for v in value.pb])
+
+    # We got a list (or something list-like); convert it.
+    return struct_pb2.ListValue(values=[to_value(v) for v in value])
+
+
+def to_mapping_value(value) -> struct_pb2.Struct:
+    # We got a proto, or else something we sent originally.
+    # Preserve the instance we have.
+    if isinstance(value, struct_pb2.Struct):
+        return value
+    if isinstance(value, maps.MapComposite):
+        return struct_pb2.Struct(
+            fields={k: v for k, v in value.pb.items()},
+        )
+
+    # We got a dict (or something dict-like); convert it.
+    return struct_pb2.Struct(fields={k: to_value(v) for k, v in value.items()})
+
+
+class PredictionServiceClient(glm.PredictionServiceClient):
+    def predict(self, model=None, instances=None, parameters=None):
+        pr = protos.PredictRequest.pb()
+        request = pr(
+            model=model, instances=[to_value(i) for i in instances], parameters=to_value(parameters)
+        )
+        return super().predict(request)
+
+
+class PredictionServiceAsyncClient(glm.PredictionServiceAsyncClient):
+    async def predict(self, model=None, instances=None, parameters=None):
+        pr = protos.PredictRequest.pb()
+        request = pr(
+            model=model, instances=[to_value(i) for i in instances], parameters=to_value(parameters)
+        )
+        return await super().predict(request)
+
+
 @dataclasses.dataclass
 class _ClientManager:
     client_config: dict[str, Any] = dataclasses.field(default_factory=dict)
@@ -222,15 +292,20 @@ class _ClientManager:
         self.clients = {}
 
     def make_client(self, name):
-        if name == "file":
-            cls = FileServiceClient
-        elif name == "file_async":
-            cls = FileServiceAsyncClient
-        elif name.endswith("_async"):
-            name = name.split("_")[0]
-            cls = getattr(glm, name.title() + "ServiceAsyncClient")
-        else:
-            cls = getattr(glm, name.title() + "ServiceClient")
+        local_clients = {
+            "file": FileServiceClient,
+            "file_async": FileServiceAsyncClient,
+            "prediction": PredictionServiceClient,
+            "prediction_async": PredictionServiceAsyncClient,
+        }
+        cls = local_clients.get(name, None)
+
+        if cls is None:
+            if name.endswith("_async"):
+                name = name.split("_")[0]
+                cls = getattr(glm, name.title() + "ServiceAsyncClient")
+            else:
+                cls = getattr(glm, name.title() + "ServiceClient")
 
         # Attempt to configure using defaults.
         if not self.client_config:
@@ -386,3 +461,11 @@ def get_default_permission_client() -> glm.PermissionServiceClient:
 
 def get_default_permission_async_client() -> glm.PermissionServiceAsyncClient:
     return _client_manager.get_default_client("permission_async")
+
+
+def get_default_prediction_client() -> glm.PermissionServiceClient:
+    return _client_manager.get_default_client("prediction")
+
+
+def get_default_prediction_async_client() -> glm.PermissionServiceAsyncClient:
+    return _client_manager.get_default_client("prediction_async")
