@@ -1,0 +1,23 @@
+{
+    "workbench.editor.defaultBinaryEditor": "vscode.videoPreview",
+    "workbench.editor.doubleClickTabToToggleEditorGroupSizes": "maximize",
+    "workbench.editor.autoLockGroups": {
+        "mainThreadWebview-markdown.preview": true
+    },
+    "workbench.editor.centeredLayoutFixedWidth": true,
+    "workbench.editor.closeOnFileDelete": true,
+    "workbench.editor.labelFormat": "long",
+    "workbench.editor.limit.enabled": true,
+    "workbench.editor.limit.excludeDirty": true,
+    "workbench.editor.limit.perEditorGroup": true,
+    "workbench.editor.openSideBySideDirection": "down",
+    "workbench.editor.preferHistoryBasedLanguageDetection": true,
+    "workbench.editor.preventPinnedEditorClose": "keyboard",
+    "workbench.editor.revealIfOpen": true,
+    "workbench.editor.sharedViewState": true,
+    "workbench.editor.titleScrollbarSizing": "large",
+    "workbench.editor.untitled.labelFormat": "name",
+    "terminal.integrated.commandsToSkipShell": [
+        ""
+    ]
+}
